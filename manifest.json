@@ -1,10 +1,11 @@
 {
-	"id": "random-picker",
-	"name": "Random Picker",
-	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
-	"description": "Pick random items from lists and insert them in the current note",
-	"author": "Fabian Schlager",
-	"authorUrl": "https://github.com/ghtyrant",
-	"isDesktopOnly": false
+  "id": "random-picker",
+  "name": "Random Picker",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Pick random items from lists and insert them in the current note",
+  "author": "Obsidian",
+  "authorUrl": "https://obsidian.md",
+  "isDesktopOnly": false,
+  "fundingUrl": "https://obsidian.md/pricing"
 }

@@ -10,19 +10,54 @@ import {
 	TFile,
 } from "obsidian";
 
+class RandomPickTemplate {
+	name: string;
+	template: string;
+
+	async generate(sources: Map<string, RandomSource>): Promise<string> {
+		let output = "";
+		let lastVariable = 0;
+
+		// eslint-disable-next-line no-constant-condition
+		while (true) {
+			const nextVariable = this.template.indexOf("${", lastVariable);
+
+			// No more variables found
+			if (nextVariable == -1) {
+				output += this.template.slice(lastVariable + 1);
+				break;
+			}
+
+			output += this.template.slice(lastVariable + 1, nextVariable);
+
+			lastVariable = this.template.indexOf("}", nextVariable);
+
+			const varName = this.template.slice(nextVariable + 2, lastVariable);
+
+			if (sources.has(varName)) {
+				output += await sources.get(varName)?.getRandomPick(true);
+			}
+			console.log(varName);
+		}
+		return output;
+	}
+}
+
 interface RandomPickerPluginSettings {
 	listsFolder: string;
 	stripListSymbols: boolean;
 	insertSpace: boolean;
+	templates: RandomPickTemplate[];
 }
 
 const DEFAULT_SETTINGS: RandomPickerPluginSettings = {
-	listsFolder: "Random",
+	listsFolder: "Random/",
 	stripListSymbols: true,
 	insertSpace: true,
+	templates: [],
 };
 
-export default class MyPlugin extends Plugin {
+export default class RandomPickerPlugin extends Plugin {
 	settings: RandomPickerPluginSettings;
 
 	async onload() {
@@ -45,9 +80,12 @@ export default class MyPlugin extends Plugin {
 					if (!checking) {
 						new RandomSourceSelectorModal(
 							this.app,
-							this.settings.listsFolder,
-							(source) =>
-								this.insertRandomPickFromSource(editor, source)
+							this.settings.templates,
+							(template) =>
+								this.insertRandomPickFromSource(
+									editor,
+									template
+								)
 						).open();
 					}
 
@@ -71,8 +109,9 @@ export default class MyPlugin extends Plugin {
 					if (!checking) {
 						new RandomSourceSelectorModal(
 							this.app,
-							this.settings.listsFolder,
-							(source) => this.showPreviewModal(editor, source)
+							this.settings.templates,
+							(template) =>
+								this.showPreviewModal(editor, template)
 						).open();
 					}
 
@@ -99,6 +138,10 @@ export default class MyPlugin extends Plugin {
 	}
 
 	editorInsertText(editor: Editor, text: string) {
+		if (this.settings.insertSpace) {
+			text += " ";
+		}
+
 		editor.replaceRange(text, editor.getCursor());
 
 		// Move cursor to the end of the inserted text
@@ -107,22 +150,30 @@ export default class MyPlugin extends Plugin {
 		editor.setCursor(editor.offsetToPos(newCursorPosition));
 	}
 
-	showPreviewModal(editor: Editor, source: RandomSource) {
+	getRandomSources(): Map<string, RandomSource> {
+		const randomSources = new Map();
+		this.app.vault
+			.getFiles()
+			.filter((f) => f.path.startsWith(this.settings.listsFolder))
+			.map((f) =>
+				randomSources.set(f.basename, new RandomSource(this.app, f))
+			);
+		return randomSources;
+	}
+
+	showPreviewModal(editor: Editor, template: RandomPickTemplate) {
 		new RandomPickPreviewModal(
 			this.app,
-			source,
-			this.settings.stripListSymbols
+			template,
+			this.getRandomSources(),
+			(text) => this.editorInsertText(editor, text)
 		).open();
 	}
 
-	insertRandomPickFromSource(editor: Editor, source: RandomSource) {
-		source.getRandomPick(this.settings.stripListSymbols).then((text) => {
-			if (this.settings.insertSpace) {
-				text += " ";
-			}
-
-			this.editorInsertText(editor, text);
-		});
+	insertRandomPickFromSource(editor: Editor, template: RandomPickTemplate) {
+		template
+			.generate(this.getRandomSources())
+			.then((value) => this.editorInsertText(editor, value));
 	}
 }
 
@@ -158,20 +209,51 @@ class RandomSource {
 }
 
 class RandomPickPreviewModal extends Modal {
-	source: RandomSource;
-	stripListSymbols: boolean;
+	template: RandomPickTemplate;
+	sources: Map<string, RandomSource>;
+	onSubmit: (result: string) => void;
 
-	constructor(app: App, source: RandomSource, stripListSymbols: boolean) {
+	constructor(
+		app: App,
+		template: RandomPickTemplate,
+		sources: Map<string, RandomSource>,
+		onSubmit: (result: string) => void
+	) {
 		super(app);
-		this.source = source;
-		this.stripListSymbols = stripListSymbols;
+		this.template = template;
+		this.sources = sources;
+		this.onSubmit = onSubmit;
 	}
 
 	onOpen() {
 		const { contentEl } = this;
-		this.source
-			.getRandomPick(this.stripListSymbols)
-			.then((text) => contentEl.setText(text));
+		contentEl.createEl("h1", {
+			text: `Random Pick - ${this.template.name}`,
+		});
+		console.log(this.template);
+
+		const nameEl = contentEl.createEl("p");
+		this.template
+			.generate(this.sources)
+			.then((text) => nameEl.setText(text));
+
+		new Setting(contentEl)
+			.addButton((btn) =>
+				btn.setButtonText("Regenerate").onClick(() => {
+					this.template
+						.generate(this.sources)
+						.then((text) => nameEl.setText(text));
+				})
+			)
+			.addButton((btn) =>
+				btn
+					.setButtonText("Insert")
+					.setCta()
+					.onClick(() => {
+						this.close();
+						this.onSubmit(nameEl.getText());
+					})
+			);
 	}
 
 	onClose() {
@@ -180,45 +262,43 @@ class RandomPickPreviewModal extends Modal {
 	}
 }
 
-class RandomSourceSelectorModal extends FuzzySuggestModal<RandomSource> {
-	callback: (item: RandomSource) => void;
-	folder: string;
+class RandomSourceSelectorModal extends FuzzySuggestModal<RandomPickTemplate> {
+	callback: (item: RandomPickTemplate) => void;
+	templates: RandomPickTemplate[];
 	randomLists: Map<string, string[]>;
 
 	constructor(
 		app: App,
-		folder: string,
-		callback: (item: RandomSource) => void
+		templates: RandomPickTemplate[],
+		callback: (item: RandomPickTemplate) => void
 	) {
 		super(app);
 		this.callback = callback;
-		this.randomLists = new Map();
-		this.folder = folder;
+		this.templates = templates;
 	}
 
-	getItems(): RandomSource[] {
-		const files = this.app.vault
-			.getFiles()
-			.filter((f) => f.path.startsWith(this.folder))
-			.map((f) => new RandomSource(this.app, f));
-
-		return files;
+	getItems(): RandomPickTemplate[] {
+		return this.templates;
 	}
 
-	getItemText(item: RandomSource): string {
-		return item.name();
+	getItemText(item: RandomPickTemplate): string {
+		return item.name;
 	}
 
-	onChooseItem(item: RandomSource, _evt: MouseEvent | KeyboardEvent): void {
+	onChooseItem(
+		item: RandomPickTemplate,
+		_evt: MouseEvent | KeyboardEvent
+	): void {
 		this.callback(item);
 	}
 }
 
 class SettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+	plugin: RandomPickerPlugin;
 	warnText: HTMLElement;
+	templatesEl: HTMLElement;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: RandomPickerPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -228,7 +308,7 @@ class SettingTab extends PluginSettingTab {
 		let message = "";
 
 		if (folder == null) {
-			message = "Folder does not exist! Oh no";
+			message = "Folder does not exist!";
 		}
 
 		if (folder instanceof TFile) {
@@ -238,6 +318,41 @@ class SettingTab extends PluginSettingTab {
 		console.log(message);
 
 		this.warnText.setText(message);
+	}
+
+	displayTemplates(): void {
+		this.plugin.settings.templates.forEach((template) => {
+			this.templatesEl.createEl("small", { text: "Name" });
+			const nameSetting = new Setting(this.templatesEl)
+				.setClass("random-picker-template-setting")
+				.addText((text) => {
+					text.setValue(template.name).onChange(async (value) => {
+						template.name = value;
+						await this.plugin.saveSettings();
+					});
+
+					text.inputEl.addClass("random-picker-full");
+				});
+
+			nameSetting.infoEl.remove();
+
+			this.templatesEl.createEl("small", { text: "Template" });
+			const templateSetting = new Setting(this.templatesEl)
+				.setClass("random-picker-template-setting")
+				.addTextArea((text) => {
+					text.setValue(template.template).onChange(async (value) => {
+						template.template = value;
+						await this.plugin.saveSettings();
+					});
+					text.inputEl.addClass("random-picker-full");
+				});
+
+			templateSetting.infoEl.remove();
+
+			this.templatesEl.createEl("hr", {
+				cls: "random-picker-template-separator",
+			});
+		});
 	}
 
 	display(): void {
@@ -273,8 +388,6 @@ class SettingTab extends PluginSettingTab {
 			cls: "random-picker-warn",
 		});
 
-		console.log(this.warnText);
-
 		this.updateWarnText(this.plugin.settings.listsFolder);
 
 		new Setting(containerEl)
@@ -302,5 +415,22 @@ class SettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+
+		containerEl.createEl("h2", { text: "Templates" });
+		new Setting(containerEl).addButton((btn) =>
+			btn
+				.setButtonText("Add")
+				.setCta()
+				.onClick(() => {
+					this.plugin.settings.templates.push(
+						new RandomPickTemplate()
+					);
+					this.templatesEl.empty();
+					this.displayTemplates();
+				})
+		);
+
+		this.templatesEl = containerEl.createDiv();
+		this.displayTemplates();
 	}
 }

@@ -10,3 +10,15 @@ If your plugin does not need CSS, delete this file.
 .random-picker-warn {
 	color: red;
 }
+
+.random-picker-template-setting {
+	border-top: 0;
+}
+
+.random-picker-template-separator {
+	margin: 0 0 1em 0;
+}
+
+.random-picker-full {
+	width: 100%;
+}
