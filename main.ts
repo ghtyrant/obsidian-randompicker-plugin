@@ -4,6 +4,7 @@ import {
 	FuzzySuggestModal,
 	MarkdownView,
 	Modal,
+	Notice,
 	Plugin,
 	PluginSettingTab,
 	Setting,
@@ -14,31 +15,47 @@ class RandomPickTemplate {
 	name: string;
 	template: string;
 
+	constructor(name: string, template: string) {
+		this.name = name;
+		this.template = template;
+	}
+
 	async generate(sources: Map<string, RandomSource>): Promise<string> {
 		let output = "";
-		let lastVariable = 0;
+		let variableEnd = -1;
 
 		// eslint-disable-next-line no-constant-condition
 		while (true) {
-			const nextVariable = this.template.indexOf("${", lastVariable);
+			const nextVariable = this.template.indexOf("${", variableEnd);
 
 			// No more variables found
 			if (nextVariable == -1) {
-				output += this.template.slice(lastVariable + 1);
+				output += this.template.slice(variableEnd + 1);
 				break;
 			}
 
-			output += this.template.slice(lastVariable + 1, nextVariable);
+			output += this.template.slice(variableEnd + 1, nextVariable);
 
-			lastVariable = this.template.indexOf("}", nextVariable);
+			variableEnd = this.template.indexOf("}", nextVariable);
 
-			const varName = this.template.slice(nextVariable + 2, lastVariable);
+			if (variableEnd == -1) {
+				new Notice(
+					`[Random Picker] Error: Malformed template '${this.name}'!`
+				);
+				break;
+			}
+
+			const varName = this.template.slice(nextVariable + 2, variableEnd);
 
 			if (sources.has(varName)) {
 				output += await sources.get(varName)?.getRandomPick(true);
+			} else {
+				new Notice(
+					`[Random Picker] Error in '${this.name}': ${varName} not found!`
+				);
 			}
-			console.log(varName);
 		}
+
 		return output;
 	}
 }
@@ -62,8 +79,6 @@ export default class RandomPickerPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
-
-		console.log(this.settings);
 
 		this.addCommand({
 			id: "insert-random-pick",
@@ -130,6 +145,10 @@ export default class RandomPickerPlugin extends Plugin {
 			{},
 			DEFAULT_SETTINGS,
 			await this.loadData()
+		);
+
+		this.settings.templates = this.settings.templates.map(
+			(t) => new RandomPickTemplate(t.name, t.template)
 		);
 	}
 
@@ -230,7 +249,6 @@ class RandomPickPreviewModal extends Modal {
 		contentEl.createEl("h1", {
 			text: `Random Pick - ${this.template.name}`,
 		});
-		console.log(this.template);
 
 		const nameEl = contentEl.createEl("p");
 		this.template
@@ -314,8 +332,6 @@ class SettingTab extends PluginSettingTab {
 		if (folder instanceof TFile) {
 			message = "Please specify a path to a folder!";
 		}
-
-		console.log(message);
 
 		this.warnText.setText(message);
 	}
@@ -423,7 +439,7 @@ class SettingTab extends PluginSettingTab {
 				.setCta()
 				.onClick(() => {
 					this.plugin.settings.templates.push(
-						new RandomPickTemplate()
+						new RandomPickTemplate("", "")
 					);
 					this.templatesEl.empty();
 					this.displayTemplates();
