@@ -48,7 +48,7 @@ class RandomPickTemplate {
 			const varName = this.template.slice(nextVariable + 2, variableEnd);
 
 			if (sources.has(varName)) {
-				output += await sources.get(varName)?.getRandomPick(true);
+				output += await sources.get(varName)?.getRandomPick();
 			} else {
 				new Notice(
 					`[Random Picker] Error in '${this.name}': ${varName} not found!`
@@ -62,13 +62,11 @@ class RandomPickTemplate {
 
 interface RandomPickerPluginSettings {
 	listsFolder: string;
-	stripListSymbols: boolean;
 	templates: RandomPickTemplate[];
 }
 
 const DEFAULT_SETTINGS: RandomPickerPluginSettings = {
 	listsFolder: "Random/",
-	stripListSymbols: true,
 	templates: [],
 };
 
@@ -203,16 +201,13 @@ class RandomSource {
 		return this.file.basename;
 	}
 
-	async getRandomPick(stripListSymbols: boolean): Promise<string> {
+	async getRandomPick(): Promise<string> {
 		return this.app.vault.cachedRead(this.file).then((text) => {
 			const items = text.split("\n").filter((l) => l.trim().length > 0);
 			const item = items[Math.floor(Math.random() * items.length)].trim();
 
 			// Remove bullet list symbols. There's probably a better way to do this
-			if (
-				stripListSymbols &&
-				(item.startsWith("* ") || item.startsWith("- "))
-			) {
+			if (item.startsWith("* ") || item.startsWith("- ")) {
 				return item.slice(2);
 			}
 
@@ -417,20 +412,6 @@ class SettingTab extends PluginSettingTab {
 		});
 
 		this.updateWarnText(this.plugin.settings.listsFolder);
-
-		new Setting(containerEl)
-			.setName("Strip List Symbols")
-			.setDesc(
-				"Strip Markdown list symbols (e.g. - or *) before inserting the random pick."
-			)
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.stripListSymbols)
-					.onChange(async (value) => {
-						this.plugin.settings.stripListSymbols = value;
-						await this.plugin.saveSettings();
-					})
-			);
 
 		// Templates List
 		containerEl.createEl("h2", { text: "Templates" });
